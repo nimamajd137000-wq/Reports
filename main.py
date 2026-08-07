@@ -26,7 +26,7 @@ def main(page: ft.Page):
     page.scroll = ft.ScrollMode.AUTO
     page.theme_mode = ft.ThemeMode.LIGHT
 
-    # فیلدها و کادرهای ورودی (آیکون‌ها به ft.Icons تغییر یافتند)
+    # فیلدها و کادرهای ورودی
     txt_expert = ft.TextField(label="نام کارشناس", icon=ft.Icons.PERSON)
     txt_date = ft.TextField(
         label="تاریخ ثبت", 
@@ -39,14 +39,15 @@ def main(page: ft.Page):
         min_lines=3, 
         icon=ft.Icons.DESCRIPTION
     )
+    
+    # Dropdown اصلاح‌شده (آرگومان icon و فرمت Option اصلاح شد)
     dd_status = ft.Dropdown(
         label="وضعیت",
         value="انجام شده",
         options=[
-            ft.dropdown.Option("انجام شده"),
-            ft.dropdown.Option("نیازمند پیگیری"),
+            ft.DropdownOption("انجام شده"),
+            ft.DropdownOption("نیازمند پیگیری"),
         ],
-        icon=ft.Icons.CHECK_CIRCLE
     )
 
     # لیست کارت‌های نمایش گزارش
@@ -82,9 +83,7 @@ def main(page: ft.Page):
     def add_report(e):
         if not txt_expert.value or not txt_desc.value:
             snack = ft.SnackBar(content=ft.Text("لطفاً تمامی فیلدها را پر کنید."))
-            page.overlay.append(snack)
-            snack.open = True
-            page.update()
+            page.open(snack)  # شیوه استاندارد نمایش SnackBar در نسخه جدید
             return
 
         conn = sqlite3.connect("activity_reports.db")
@@ -98,8 +97,7 @@ def main(page: ft.Page):
 
         txt_desc.value = ""
         snack = ft.SnackBar(content=ft.Text("گزارش با موفقیت ثبت شد."))
-        page.overlay.append(snack)
-        snack.open = True
+        page.open(snack)  # شیوه استاندارد نمایش SnackBar در نسخه جدید
         load_reports()
 
     # دکمه ثبت
@@ -110,7 +108,7 @@ def main(page: ft.Page):
         ft.Text("ثبت فعالیت جدید", size=20, weight=ft.FontWeight.BOLD),
         txt_expert,
         txt_date,
-        dd_status,
+        ft.Row([ft.Icon(ft.Icons.CHECK_CIRCLE), ft.Container(content=dd_status, expand=True)]),
         txt_desc,
         btn_submit,
         ft.Divider(),
