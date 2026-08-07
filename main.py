@@ -1,17 +1,56 @@
+import flet as ft
 import sqlite3
 import uuid
 import os
-from kivy.app import App
-from kivy.uix.screenmanager import ScreenManager, Screen
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
-from kivy.uix.button import Button
-from kivy.uix.scrollview import ScrollView
-from kivy.uix.gridlayout import GridLayout
+import pandas as pd
+from datetime import datetime
 
-# --- 1. Database Initialization ---
 DB_NAME = "app_database.db"
+
+# --- 1. توابع محاسباتی و تاریخ شمسی (دقیقاً طبق منطق کد اولیه) ---
+
+def normalize_persian_text(text):
+    if not text:
+        return ""
+    translation_table = str.maketrans({
+        '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
+        '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
+        '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
+        '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+        '-': '/'
+    })
+    return str(text).translate(translation_table).strip()
+
+def gregorian_to_jalali(gy, gm, gd):
+    g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
+    if gy > 1600:
+        jy = 979
+        gy -= 1600
+    else:
+        jy = 0
+        gy -= 621
+    gy2 = (gy + 1) if gm > 2 else gy
+    days = (365 * gy) + ((gy2 + 3) // 4) - ((gy2 + 99) // 100) + ((gy2 + 399) // 400) - 80 + gd + g_d_m[gm - 1]
+    jy += 33 * (days // 12053)
+    days %= 12053
+    jy += 4 * (days // 1461)
+    days %= 1461
+    if days > 365:
+        jy += (days - 1) // 365
+        days = (days - 1) % 365
+    if days < 186:
+        jm = 1 + (days // 31)
+        jd = 1 + (days % 31)
+    else:
+        jm = 7 + ((days - 186) // 30)
+        jd = 1 + ((days - 186) % 30)
+    return f"{jy}/{jm:02d}/{jd:02d}"
+
+def get_current_jalali_date():
+    now = datetime.now()
+    return gregorian_to_jalali(now.year, now.month, now.day)
+
+# --- 2. آماده‌سازی پایگاه داده ---
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -38,136 +77,284 @@ def init_db():
         )
     ''')
     cursor.execute('''
+        CREATE TABLE IF NOT EXISTS assigned_tasks (
+            id TEXT PRIMARY KEY,
+            username TEXT,
+            title TEXT,
+            description TEXT,
+            deadline TEXT,
+            priority TEXT,
+            status TEXT
+        )
+    ''')
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT
         )
     ''')
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('admin_password', 'admin123')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('action_types', 'بررسی,پیگیری,جلسه,توسعه,سایر')")
     conn.commit()
     conn.close()
 
-init_db()
+# --- 3. برنامه اصلی و رابط کاربری (Flet UI) ---
 
-# --- 2. Screens (UI) ---
+def main(page: ft.Page):
+    init_db()
+    page.title = "سامانه مدیریت گزارش‌ها"
+    page.rtl = True
+    page.theme_mode = ft.ThemeMode.LIGHT
+    page.scroll = ft.ScrollMode.AUTO
 
-class LoginScreen(Screen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
-        
-        layout.add_widget(Label(text="سامانه مدیریت گزارش‌ها (اندروید)", font_size=24))
-        
-        self.username_input = TextInput(hint_text="نام کاربری", multiline=False)
-        self.password_input = TextInput(hint_text="رمز عبور", password=True, multiline=False)
-        
-        layout.add_widget(self.username_input)
-        layout.add_widget(self.password_input)
-        
-        btn_login = Button(text="ورود کارشناس", size_hint_y=None, height=50)
-        btn_login.bind(on_press=self.login_user)
-        
-        btn_admin = Button(text="ورود مدیر", size_hint_y=None, height=50)
-        btn_admin.bind(on_press=self.login_admin)
-        
-        layout.add_widget(btn_login)
-        layout.add_widget(btn_admin)
-        
-        self.msg_label = Label(text="", color=(1, 0, 0, 1))
-        layout.add_widget(self.msg_label)
-        
-        self.add_widget(layout)
+    current_user = {"username": None, "is_admin": False}
 
-    def login_user(self, instance):
-        user = self.username_input.text
-        pwd = self.password_input.text
-        if not user or not pwd:
-            self.msg_label.text = "لطفاً نام کاربری و رمز را وارد کنید"
-            return
-            
+    def get_action_types():
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        cursor.execute("SELECT password FROM users WHERE username=?", (user,))
+        cursor.execute("SELECT value FROM settings WHERE key='action_types'")
         row = cursor.fetchone()
         conn.close()
-        
-        if row and row[0] == pwd:
-            self.manager.current = 'expert_dashboard'
-        else:
-            self.msg_label.text = "نام کاربری یا رمز عبور اشتباه است"
+        return row[0].split(',') if row else ["عمومی"]
 
-    def login_admin(self, instance):
-        pwd = self.password_input.text
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("SELECT value FROM settings WHERE key='admin_password'")
-        admin_pwd = cursor.fetchone()[0]
-        conn.close()
-        
-        if pwd == admin_pwd:
-            self.manager.current = 'admin_dashboard'
-        else:
-            self.msg_label.text = "رمز مدیریت اشتباه است"
+    # --- صفحات برنامه ---
 
+    def show_login():
+        page.clean()
+        
+        user_input = ft.TextField(label="نام کاربری", width=300)
+        pass_input = ft.TextField(label="رمز عبور", password=True, can_reveal_password=True, width=300)
+        msg_text = ft.Text(color=ft.colors.RED_500)
 
-class ExpertDashboard(Screen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
-        layout.add_widget(Label(text="پنل کارشناس", font_size=20))
-        
-        # فرم ثبت گزارش سریع
-        self.title_input = TextInput(hint_text="عنوان فعالیت", multiline=False)
-        self.desc_input = TextInput(hint_text="شرح فعالیت", multiline=True)
-        
-        layout.add_widget(self.title_input)
-        layout.add_widget(self.desc_input)
-        
-        btn_submit = Button(text="ثبت گزارش", size_hint_y=None, height=50)
-        btn_submit.bind(on_press=self.submit_report)
-        layout.add_widget(btn_submit)
-        
-        btn_back = Button(text="خروج", size_hint_y=None, height=50)
-        btn_back.bind(on_press=lambda x: setattr(self.manager, 'current', 'login'))
-        layout.add_widget(btn_back)
-        
-        self.add_widget(layout)
+        def handle_login(e):
+            username = normalize_persian_text(user_input.value)
+            password = pass_input.value
 
-    def submit_report(self, instance):
-        # ذخیره نمونه گزارش در دیتابیس
-        if self.title_input.text:
+            if not username or not password:
+                msg_text.value = "لطفاً تمام فیلدها را پر کنید"
+                page.update()
+                return
+
+            conn = sqlite3.connect(DB_NAME)
+            cursor = conn.cursor()
+            cursor.execute("SELECT password FROM users WHERE username=?", (username,))
+            user = cursor.fetchone()
+            conn.close()
+
+            if user:
+                if user[0] == password:
+                    current_user["username"] = username
+                    current_user["is_admin"] = False
+                    show_expert_panel()
+                else:
+                    msg_text.value = "رمز عبور اشتباه است"
+            else:
+                # ثبت‌نام کاربر جدید
+                show_register(username, password)
+            page.update()
+
+        def handle_admin_login(e):
+            password = pass_input.value
+            conn = sqlite3.connect(DB_NAME)
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM settings WHERE key='admin_password'")
+            admin_pwd = cursor.fetchone()[0]
+            conn.close()
+
+            if password == admin_pwd:
+                current_user["username"] = "مدیر"
+                current_user["is_admin"] = True
+                show_admin_panel()
+            else:
+                msg_text.value = "رمز مدیریت اشتباه است"
+            page.update()
+
+        page.add(
+            ft.Column(
+                [
+                    ft.Text("ورود به سامانه مدیریت گزارش‌ها", size=22, weight=ft.FontWeight.BOLD),
+                    user_input,
+                    pass_input,
+                    ft.ElevatedButton("ورود / ثبت‌نام کارشناس", on_click=handle_login, width=300),
+                    ft.OutlinedButton("ورود مدیریت", on_click=handle_admin_login, width=300),
+                    msg_text
+                ],
+                alignment=ft.MainAxisAlignment.CENTER,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER
+            )
+        )
+
+    def show_register(username, password):
+        page.clean()
+        p_code = ft.TextField(label="کد پرسنلی", width=300)
+        dept = ft.TextField(label="دپارتمان / واحد", width=300)
+        phone = ft.TextField(label="شماره تماس", width=300)
+
+        def save_user(e):
+            conn = sqlite3.connect(DB_NAME)
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO users VALUES (?, ?, ?, ?, ?)",
+                (username, password, p_code.value, dept.value, phone.value)
+            )
+            conn.commit()
+            conn.close()
+            current_user["username"] = username
+            current_user["is_admin"] = False
+            show_expert_panel()
+
+        page.add(
+            ft.Column(
+                [
+                    ft.Text(f"تکمیل اطلاعات ثبت‌نام برای {username}", size=18, weight=ft.FontWeight.BOLD),
+                    p_code, dept, phone,
+                    ft.ElevatedButton("ثبت و ورود", on_click=save_user, width=300)
+                ],
+                alignment=ft.MainAxisAlignment.CENTER,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER
+            )
+        )
+
+    def show_expert_panel():
+        page.clean()
+
+        title_in = ft.TextField(label="عنوان فعالیت", width=400)
+        action_dropdown = ft.Dropdown(
+            label="نوع اقدام",
+            options=[ft.dropdown.Option(x) for x in get_action_types()],
+            width=200
+        )
+        priority_dropdown = ft.Dropdown(
+            label="اولویت",
+            options=[ft.dropdown.Option("عادی"), ft.dropdown.Option("مهم"), ft.dropdown.Option("فوری")],
+            value="عادی",
+            width=180
+        )
+        desc_in = ft.TextField(label="شرح فعالیت", multiline=True, width=400, min_lines=3)
+        status_dropdown = ft.Dropdown(
+            label="وضعیت",
+            options=[ft.dropdown.Option("انجام شده"), ft.dropdown.Option("در حال انجام"), ft.dropdown.Option("معوق")],
+            value="انجام شده",
+            width=200
+        )
+        msg_text = ft.Text()
+
+        def submit_report(e):
+            if not title_in.value or not action_dropdown.value:
+                msg_text.value = "عنوان و نوع اقدام الزامی است"
+                msg_text.color = ft.colors.RED_500
+                page.update()
+                return
+
             conn = sqlite3.connect(DB_NAME)
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO reports VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (str(uuid.uuid4()), "user", self.title_input.text, "اقدام اولیه", "عادی", "1403/01/01", self.desc_input.text, "انجام شده")
+                (
+                    str(uuid.uuid4()),
+                    current_user["username"],
+                    title_in.value,
+                    action_dropdown.value,
+                    priority_dropdown.value,
+                    get_current_jalali_date(),
+                    desc_in.value,
+                    status_dropdown.value
+                )
             )
             conn.commit()
             conn.close()
-            self.title_input.text = ""
-            self.desc_input.text = ""
 
+            title_in.value = ""
+            desc_in.value = ""
+            msg_text.value = "گزارش با موفقیت ثبت شد"
+            msg_text.color = ft.colors.GREEN_500
+            load_reports_list()
+            page.update()
 
-class AdminDashboard(Screen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
-        layout.add_widget(Label(text="پنل مدیریت", font_size=20))
-        
-        btn_back = Button(text="خروج به صفحه ورود", size_hint_y=None, height=50)
-        btn_back.bind(on_press=lambda x: setattr(self.manager, 'current', 'login'))
-        layout.add_widget(btn_back)
-        
-        self.add_widget(layout)
+        reports_list = ft.Column()
 
-# --- 3. Main Application Class ---
-class ReportSystemApp(App):
-    def build(self):
-        sm = ScreenManager()
-        sm.add_widget(LoginScreen(name='login'))
-        sm.add_widget(ExpertDashboard(name='expert_dashboard'))
-        sm.add_widget(AdminDashboard(name='admin_dashboard'))
-        return sm
+        def load_reports_list():
+            reports_list.controls.clear()
+            conn = sqlite3.connect(DB_NAME)
+            cursor = conn.cursor()
+            cursor.execute("SELECT title, action_type, priority, jalali_date, status FROM reports WHERE username=? ORDER BY jalali_date DESC", (current_user["username"],))
+            rows = cursor.fetchall()
+            conn.close()
 
-if __name__ == '__main__':
-    ReportSystemApp().run()
+            for r in rows:
+                reports_list.controls.append(
+                    ft.Card(
+                        content=ft.Container(
+                            padding=10,
+                            content=ft.Column([
+                                ft.Text(f"عنوان: {r[0]}", weight=ft.FontWeight.BOLD),
+                                ft.Text(f"نوع: {r[1]} | اولویت: {r[2]} | تاریخ: {r[3]} | وضعیت: {r[4]}")
+                            ])
+                        )
+                    )
+                )
+
+        load_reports_list()
+
+        page.add(
+            ft.AppBar(title=ft.Text(f"پنل کارشناس: {current_user['username']}"), actions=[ft.IconButton(ft.icons.LOGOUT, on_click=lambda e: show_login())]),
+            ft.Text("ثبت گزارش جدید", size=18, weight=ft.FontWeight.BOLD),
+            ft.Row([title_in, action_dropdown, priority_dropdown], wrap=True),
+            desc_in,
+            ft.Row([status_dropdown, ft.ElevatedButton("ثبت گزارش", on_click=submit_report)]),
+            msg_text,
+            ft.Divider(),
+            ft.Text("گزارش‌های ثبت شده شما", size=18, weight=ft.FontWeight.BOLD),
+            reports_list
+        )
+
+    def show_admin_panel():
+        page.clean()
+
+        all_reports_list = ft.Column()
+        search_in = ft.TextField(label="جستجو بر اساس کارشناس / کلیدواژه / تاریخ", width=300)
+
+        def load_all_reports(e=None):
+            all_reports_list.controls.clear()
+            conn = sqlite3.connect(DB_NAME)
+            cursor = conn.cursor()
+
+            query = "SELECT username, title, action_type, priority, jalali_date, status FROM reports"
+            params = []
+            if search_in.value:
+                val = f"%{search_in.value}%"
+                query += " WHERE username LIKE ? OR title LIKE ? OR description LIKE ? OR jalali_date LIKE ?"
+                params = [val, val, val, val]
+
+            query += " ORDER BY jalali_date DESC"
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            conn.close()
+
+            for r in rows:
+                all_reports_list.controls.append(
+                    ft.Card(
+                        content=ft.Container(
+                            padding=10,
+                            content=ft.Column([
+                                ft.Text(f"کارشناس: {r[0]} | عنوان: {r[1]}", weight=ft.FontWeight.BOLD),
+                                ft.Text(f"نوع: {r[2]} | اولویت: {r[3]} | تاریخ: {r[4]} | وضعیت: {r[5]}")
+                            ])
+                        )
+                    )
+                )
+            page.update()
+
+        load_all_reports()
+
+        page.add(
+            ft.AppBar(title=ft.Text("پنل مدیریت سیستم"), actions=[ft.IconButton(ft.icons.LOGOUT, on_click=lambda e: show_login())]),
+            ft.Row([search_in, ft.ElevatedButton("جستجو", on_click=load_all_reports)]),
+            ft.Divider(),
+            ft.Text("کلیه گزارش‌های سیستم", size=18, weight=ft.FontWeight.BOLD),
+            all_reports_list
+        )
+
+    show_login()
+
+ft.app(target=main)
