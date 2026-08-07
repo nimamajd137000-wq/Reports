@@ -1,3 +1,4 @@
+```yaml
 name: Build Android APK
 
 on:
@@ -26,6 +27,13 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Check files
+        run: |
+          pwd
+          ls -la
+          test -f main.py
+          echo "main.py found"
+
       - name: Check Flutter
         run: |
           flutter --version
@@ -38,14 +46,16 @@ jobs:
 
       - name: Build APK
         run: |
-          flet build apk --module-name main.py --verbose
+          flet build apk --module-name main --verbose
 
       - name: Find APK
         run: |
-          find build -type f -name "*.apk" -print
+          find . -type f -name "*.apk" -print
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Reports-APK
-          path: build/**/*.apk
+          path: "**/*.apk"
+          if-no-files-found: error
+```
