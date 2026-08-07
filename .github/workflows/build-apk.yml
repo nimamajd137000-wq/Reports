@@ -1,4 +1,3 @@
-```yaml
 name: Build Android APK
 
 on:
@@ -20,19 +19,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Setup Flutter 3.44.8
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.44.8"
           channel: stable
           cache: true
-
-      - name: Check files
-        run: |
-          pwd
-          ls -la
-          test -f main.py
-          echo "main.py found"
 
       - name: Check Flutter
         run: |
@@ -46,16 +38,14 @@ jobs:
 
       - name: Build APK
         run: |
-          flet build apk --module-name main --verbose
+          flet build apk --module-name main.py --verbose
 
       - name: Find APK
         run: |
-          find . -type f -name "*.apk" -print
+          find build -type f -name "*.apk" -print
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Reports-APK
-          path: "**/*.apk"
-          if-no-files-found: error
-```
+          path: build/**/*.apk
