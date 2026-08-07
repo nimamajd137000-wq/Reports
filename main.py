@@ -26,18 +26,18 @@ def main(page: ft.Page):
     page.scroll = ft.ScrollMode.AUTO
     page.theme_mode = ft.ThemeMode.LIGHT
 
-    # فیلدها و کادرهای ورودی
-    txt_expert = ft.TextField(label="نام کارشناس", icon=ft.icons.PERSON)
+    # فیلدها و کادرهای ورودی (آیکون‌ها به ft.Icons تغییر یافتند)
+    txt_expert = ft.TextField(label="نام کارشناس", icon=ft.Icons.PERSON)
     txt_date = ft.TextField(
         label="تاریخ ثبت", 
         value=datetime.now().strftime("%Y-%m-%d"), 
-        icon=ft.icons.CALENDAR_TODAY
+        icon=ft.Icons.CALENDAR_TODAY
     )
     txt_desc = ft.TextField(
         label="شرح فعالیت", 
         multiline=True, 
         min_lines=3, 
-        icon=ft.icons.DESCRIPTION
+        icon=ft.Icons.DESCRIPTION
     )
     dd_status = ft.Dropdown(
         label="وضعیت",
@@ -46,7 +46,7 @@ def main(page: ft.Page):
             ft.dropdown.Option("انجام شده"),
             ft.dropdown.Option("نیازمند پیگیری"),
         ],
-        icon=ft.icons.CHECK_CIRCLE
+        icon=ft.Icons.CHECK_CIRCLE
     )
 
     # لیست کارت‌های نمایش گزارش
@@ -67,7 +67,7 @@ def main(page: ft.Page):
                     content=ft.Container(
                         content=ft.Column([
                             ft.ListTile(
-                                leading=ft.Icon(ft.icons.ASSIGNMENT),
+                                leading=ft.Icon(ft.Icons.ASSIGNMENT),
                                 title=ft.Text(f"{r[1]} - {r[2]}", weight=ft.FontWeight.BOLD),
                                 subtitle=ft.Text(f"وضعیت: {r[3]}\n{r[4]}"),
                             )
@@ -103,7 +103,7 @@ def main(page: ft.Page):
         load_reports()
 
     # دکمه ثبت
-    btn_submit = ft.ElevatedButton("ثبت گزارش", icon=ft.icons.ADD, on_click=add_report)
+    btn_submit = ft.ElevatedButton("ثبت گزارش", icon=ft.Icons.ADD, on_click=add_report)
 
     # افزودن المان‌ها به صفحه
     page.add(
@@ -122,4 +122,4 @@ def main(page: ft.Page):
 
 # ==================== ۳. اجرای برنامه ====================
 if __name__ == "__main__":
-    ft.run(main, port=8550)
+    ft.app(target=main)
